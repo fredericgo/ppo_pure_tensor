@@ -19,6 +19,7 @@ FLAGS = tf.app.flags.FLAGS
 flags.DEFINE_string('logdir', './tmp/agent', 'TensorFlow log directory.')
 flags.DEFINE_enum('mode', 'train', ['train', 'test'], 'Training or test mode.')
 
+flags.DEFINE_string('game', 'CartPole-v0', 'game code')
 
 # Flags used for distributed training.
 flags.DEFINE_integer('task', -1, 'Task id. Use -1 for local training.')
@@ -131,10 +132,10 @@ class Agent(snt.AbstractModule):
     return snt.BatchApply(self._head)((tf.stack(core_output_list), actions))
 
 
-def create_environment(game_name):
+def create_environment(game_name, state_size):
   """Creates an environment wrapped in a `FlowEnvironment`."""
   config = {
-    'observation_size': 8
+    'observation_size': state_size
   }
 
   p = py_process.PyProcess(environments.PyProcessGym, game_name, config)
@@ -208,9 +209,7 @@ def compute_ppo_loss(logits, actions, advantages):
   surr2 = tf.clip_by_value(ratio,
                       1 - FLAGS.PPO_clip_ratio,
                       1 + FLAGS.PPO_clip_ratio) * advantages
-  ppo_loss_per_timestep = log_prob * advantages
-  #tf.minimum(surr1, surr2)
-  #tf.minimum(ratio * advantages, min_adv)
+  ppo_loss_per_timestep = log_prob * tf.minimum(surr1, surr2)
   return -tf.reduce_sum(ppo_loss_per_timestep)
 
 def compute_baseline_loss(advantages):
@@ -358,8 +357,17 @@ def build_learner(agent, env_outputs, agent_outputs):
 
   return done, infos, num_env_frames_and_train
 
+
+def find_size(game):
+  env = gym.make(game)
+  action_size = env.action_space.n
+  state_size = env.observation_space.shape[0]
+  return action_size, state_size
+
 def train(game_name):
-  action_size = 4
+  
+  action_size, state_size = find_size(game_name)
+
   """Train."""
   if is_single_machine():
     local_job_device = ''
@@ -375,7 +383,7 @@ def train(game_name):
   # Only used to find the actor output structure.
   with tf.Graph().as_default():
     agent = Agent(action_size)
-    env = create_environment(game_name)
+    env = create_environment(game_name, state_size)
     structure = build_actor(agent, env, game_name, action_size)
     flattened_structure = nest.flatten(structure)
     dtypes = [t.dtype for t in flattened_structure]
@@ -390,7 +398,7 @@ def train(game_name):
       agent = Agent(action_size)
 
     tf.logging.info('Creating actor with game %s', game_name)
-    env = create_environment(game_name)
+    env = create_environment(game_name, state_size)
     actor_output = build_actor(agent, env, game_name, action_size)
     # Create global step, which is the number of environment frames processed.
     tf.get_variable(
@@ -491,7 +499,7 @@ def test(game_name):
     output = build_actor(agent, env, game_name, action_size)
 
     with tf.train.SingularMonitoredSession(
-          # checkpoint_dir=FLAGS.logdir,
+          checkpoint_dir=FLAGS.logdir,
           hooks=[py_process.PyProcessHook()]) as session:
       while True:
         done_v, infos_v = session.run((
@@ -507,7 +515,7 @@ def test(game_name):
 
 def main(_):
   tf.logging.set_verbosity(tf.logging.INFO)
-  game_name = 'LunarLander-v2'
+  game_name = FLAGS.game
 
   if FLAGS.mode == 'train':
     train(game_name)

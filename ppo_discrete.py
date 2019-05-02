@@ -90,9 +90,9 @@ class Agent(snt.AbstractModule):
 
     with tf.variable_scope('mlp'):
       mlp_out = frame
-      mlp_out = snt.Linear(64)(mlp_out)
+      mlp_out = snt.Linear(32)(mlp_out)
       mlp_out = tf.nn.relu(mlp_out)
-      mlp_out = snt.Linear(64)(mlp_out)
+      mlp_out = snt.Linear(32)(mlp_out)
       mlp_out = tf.nn.relu(mlp_out)
 
     mlp_out = snt.BatchFlatten()(mlp_out)
@@ -336,7 +336,7 @@ def build_learner(agent, env_outputs, agent_outputs):
     total_loss = compute_ppo_loss(learner_outputs.logits, 
                                  agent_outputs.action,
                                  returns)
-    #total_loss += FLAGS.baseline_cost * compute_baseline_loss(returns-learner_outputs.baseline)
+    total_loss += FLAGS.baseline_cost * compute_baseline_loss(returns-learner_outputs.baseline)
 
    # Optimization
   num_env_frames = tf.train.get_global_step()
